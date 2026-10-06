@@ -35,10 +35,20 @@ None of these backends are provisioned in CI; every adapter supports
 ## Setup
 
 ```bash
-uv sync                      # picks up ../traced-harness as an editable path dep
+uv sync                      # pulls traced-harness from GitHub (pinned in uv.lock)
 deepeval set-gemini --model <model-id>
 export GOOGLE_API_KEY=...    # the judge and the agent under test both use this
 ```
+
+`traced-harness` isn't on PyPI, so it's consumed as a git dependency:
+
+```toml
+[tool.uv.sources]
+traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "main" }
+```
+
+`uv.lock` pins the exact resolved commit, so installs are reproducible. Pick up
+harness changes with `uv lock --upgrade-package traced-harness`.
 
 ## Running
 

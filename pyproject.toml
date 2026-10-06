@@ -19,9 +19,11 @@ dev = [
     "ruff>=0.9.0",
 ]
 
-# traced-harness is not published to PyPI; consume it from the sibling checkout.
+# traced-harness is not published to PyPI; consume it from GitHub.
+# uv.lock pins the exact resolved commit, so builds stay reproducible;
+# refresh with `uv lock --upgrade-package traced-harness`.
 [tool.uv.sources]
-traced-harness = { path = "../traced-harness", editable = true }
+traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "main" }
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
