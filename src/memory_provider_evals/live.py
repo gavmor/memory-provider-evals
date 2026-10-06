@@ -100,12 +100,45 @@ async def live_memory_agent(
             model_name=model_name or agent_model_name(),
         )
         yield LiveMemoryAgent(
-            executor=make_memory_turn_executor(agent, adapter),
+            executor=_capturing(make_memory_turn_executor(agent, adapter), adapter),
             store=store,
             mcp_label=label,
             agent=agent,
             tool_names=[t.name for t in tools.tools],
         )
+
+
+def _capturing(executor: TurnExecutor, adapter: MemoryProviderAdapter) -> TurnExecutor:
+    """Hand each finished turn to a provider that captures turns implicitly.
+
+    Some providers do not ask the agent to remember: Chronicle appends every
+    turn to an event log and extracts beliefs from it, which is the whole
+    reason its contract exposes a read tool and no write tool. Hermes drives
+    that with ``sync_turn`` after each turn; this is the harness's equivalent
+    hook, and the adapter opts in by defining ``observe_turn``.
+
+    A provider that writes only when the agent calls a tool (Nachos) defines
+    nothing and is passed through untouched.
+
+    Capture failures are not swallowed. Upstream lets a broken capture
+    degrade a live session rather than break it, but here a provider that
+    silently stopped recording would be scored as one that remembers nothing
+    — a claim about the provider when the truth is that it crashed.
+    """
+    observe = getattr(adapter, "observe_turn", None)
+    if observe is None:
+        return executor
+
+    async def _executor(prompt: str, session_id: str, peripheral: str) -> Any:
+        turn = await executor(prompt, session_id, peripheral)
+        observe(
+            turn.prompt,
+            turn.output,
+            session_id=getattr(turn, "session_id", "") or session_id,
+        )
+        return turn
+
+    return _executor
 
 
 def live_executor_factory(

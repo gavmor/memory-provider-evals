@@ -19,6 +19,9 @@ tests/evals/.runs/
 .deepeval-cache.json
 temp_test_run_data.json
 
+# Provisioned backends (upstream checkouts, not ours to vendor into git)
+vendor/
+
 # Secrets
 .env
 .env.local

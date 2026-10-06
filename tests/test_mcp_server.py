@@ -17,11 +17,16 @@ import pytest
 from mcp.client import Client
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
+from memory_provider_evals import chronicle_backend
 from memory_provider_evals.adapters import (
     CashewAdapter,
     ChronicleAdapter,
     Memex8Adapter,
     NachosAdapter,
+)
+from memory_provider_evals.chronicle_backend import (
+    ChronicleStore,
+    chronicle_repo_root,
 )
 from memory_provider_evals.mcp_server import (
     TOOL_OPERATIONS,
@@ -102,11 +107,34 @@ def test_nachos_gets_a_real_local_store_under_its_own_workspace(tmp_path):
     assert store.db_path.parent == tmp_path / "nachos_home" / "nachos"
 
 
-@pytest.mark.parametrize("adapter_cls", [CashewAdapter, ChronicleAdapter, Memex8Adapter])
+@pytest.mark.parametrize("adapter_cls", [CashewAdapter, Memex8Adapter])
 def test_service_backed_providers_get_an_unprovisioned_store(adapter_cls, tmp_path):
     store = store_for(adapter_cls(dry_run=True), tmp_path)
     assert isinstance(store, UnprovisionedStore)
     assert store.provisioning_hint
+
+
+def test_chronicle_gets_the_real_engine_when_a_checkout_is_present(tmp_path):
+    """Chronicle is a local-first plugin, not a service: a clone is the whole
+    provisioning step, so a provisioned run talks to the real engine."""
+    if chronicle_repo_root() is None:
+        pytest.skip("no Chronicle checkout on this machine")
+    store = store_for(ChronicleAdapter(dry_run=True), tmp_path)
+    assert isinstance(store, ChronicleStore)
+    # The same ephemeral home the adapter's setup() creates, so the bytes this
+    # store writes land inside the declared store_paths.
+    assert store.hermes_home == tmp_path / "chronicle"
+
+
+def test_chronicle_without_a_checkout_names_the_clone(tmp_path, monkeypatch):
+    """An absent backend has to say which absent backend, and how to get it."""
+    monkeypatch.setenv("CHRONICLE_REPO", str(tmp_path / "nowhere"))
+    monkeypatch.setattr(
+        chronicle_backend, "DEFAULT_CHECKOUTS", (tmp_path / "also-nowhere",)
+    )
+    store = store_for(ChronicleAdapter(dry_run=True), tmp_path)
+    assert isinstance(store, UnprovisionedStore)
+    assert "git clone" in store.provisioning_hint
 
 
 def test_calling_an_unprovisioned_tool_surfaces_the_provisioning_step(tmp_path):

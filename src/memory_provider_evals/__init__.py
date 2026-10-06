@@ -21,6 +21,10 @@ from memory_provider_evals.bridge import (
     run_memory_scenario,
     scenario_from_golden,
 )
+from memory_provider_evals.chronicle_backend import (
+    ChronicleStore,
+    chronicle_repo_root,
+)
 from memory_provider_evals.ingest import to_deepeval_test_cases
 from memory_provider_evals.mcp_server import (
     build_memory_server,
@@ -45,6 +49,7 @@ __all__ = [
     "BackendNotProvisioned",
     "CashewAdapter",
     "ChronicleAdapter",
+    "ChronicleStore",
     "LexicalMemoryStore",
     "Memex8Adapter",
     "MemoryEvalSuite",
@@ -57,6 +62,7 @@ __all__ = [
     "UnprovisionedStore",
     "build_adapter",
     "build_memory_server",
+    "chronicle_repo_root",
     "conversational_test_case_from_trace",
     "default_provider",
     "memory_server_for",

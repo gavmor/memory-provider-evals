@@ -95,6 +95,7 @@ src/memory_provider_evals/
   adapters.py     # the four providers under study
   memory_store.py # what answers a memory tool: a real lexical SQLite store
                   # (Nachos) or an explicit "not provisioned" failure
+  chronicle_backend.py  # the real Chronicle engine, off a checkout
   mcp_server.py   # contract -> live MCP server exposing the provider's tools
   live.py         # the wired run: server -> client -> create_agent(client=...)
   trace.py        # TraceRecord + MemoryEvalSuite judges (metric internals)
@@ -114,17 +115,49 @@ tests/
 ```
 export GEMINI_API_KEY=...
 uv run memorybench --provider nachos
+uv run memorybench --provider chronicle
 ```
 
-`nachos` needs no external backend — its store is text-only and local-first,
-which is what `LexicalMemoryStore` implements. The other three providers raise
-`BackendNotProvisioned`, naming the provisioning step, until their service is
-running; that lands in the benchmark's `error` column rather than scoring as a
-provider that remembered nothing.
+Two providers run end to end here. `nachos` is text-only and local-first, which
+is what `LexicalMemoryStore` implements, so it needs no backend at all.
+`chronicle` needs a checkout and nothing else — it is a stdlib-only Hermes
+plugin, not a service:
+
+```
+git clone https://github.com/indigokarasu/chronicle-agent-context-and-memory.git vendor/chronicle
+```
+
+`vendor/` is gitignored; `$CHRONICLE_REPO` points at a checkout anywhere, and
+one installed with `hermes plugins install
+indigokarasu/chronicle-agent-context-and-memory` is found automatically.
+`cashew` and `memex8` still raise `BackendNotProvisioned`, naming the
+provisioning step, until their service is running; that lands in the
+benchmark's `error` column rather than scoring as a provider that remembered
+nothing.
 
 `AGENT_MODEL_NAME` selects the agent model (default `gemini-flash-lite-latest`;
 the harness default `gemini-3.1-flash-lite-preview` returns 503s). The free
 Gemini tier allows 15 requests/minute, which a multi-scenario run can exceed.
+
+### Chronicle specifics
+
+Chronicle is the one provider here that does **not** ask the agent to remember.
+`CaptureEngine.observe` appends every turn to an event log and extracts beliefs
+from it, so its contract exposes one read tool (`chronicle_search`) and no
+write tool; `live.py` drives capture after each turn, where Hermes calls
+`sync_turn`. Consolidation is its curation queue plus maintenance scheduler —
+`ChronicleCore.tick`'s two halves — run in process between sessions. The
+`scripts/*.py` earlier specs named are a LongMemEval parameter sweep, a
+session-exclusion vector prune and an off-box re-embedding repair; none of them
+is a consolidation pass. See `ChronicleAdapter`'s docstring.
+
+Embeddings default to upstream's offline `hashing` embedder. Chronicle's own
+default (`auto`) opens TCP connections to LM Studio / Ollama / llama.cpp ports
+inside the core constructor, which would bind a benchmark number to whatever
+happens to be listening on the machine. The cost is real and belongs with any
+result: feature-hashed vectors are a weaker semantic tier than a real embedding
+model, so Chronicle's vector channel is measured at its offline floor.
+`$CHRONICLE_EMBED_MODEL` opts back in.
 
 ## Why the agent needs an MCP server
 

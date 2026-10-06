@@ -28,7 +28,7 @@ does the wrong thing.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,12 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
+from memory_provider_evals.chronicle_backend import (
+    CHRONICLE_CLONE_HINT,
+    ChronicleStore,
+    chronicle_home,
+    chronicle_repo_root,
+)
 from memory_provider_evals.memory_store import (
     BackendNotProvisioned,
     LexicalMemoryStore,
@@ -45,6 +51,9 @@ from memory_provider_evals.memory_store import (
 )
 
 __all__ = [
+    "LOCAL_STORE_BUILDERS",
+    "LOCAL_STORE_PROVIDERS",
+    "PROVISIONING_HINTS",
     "TOOL_OPERATIONS",
     "build_memory_server",
     "memory_server_for",
@@ -57,7 +66,7 @@ TOOL_OPERATIONS: dict[str, str] = {
     # Cashew — magnus919/hermes-cashew
     "cashew_query": "recall",
     # Chronicle — indigokarasu/chronicle-agent-context-and-memory
-    "recall": "recall",
+    "chronicle_search": "recall",
     # Memex8 — Ex8-ca/memex8
     "memex8_search": "recall",
     # Nachos — Nacho-Labs-LLC/hermes-plugin-nachos
@@ -73,20 +82,48 @@ PROVISIONING_HINTS: dict[str, str] = {
         "Install magnus919/hermes-cashew and point CASHEW_CONFIG at the "
         "sandboxed cashew.json the adapter writes."
     ),
-    "chronicle": (
-        "Clone indigokarasu/chronicle-agent-context-and-memory and pass its "
-        "repo_root to ChronicleAdapter."
-    ),
+    "chronicle": CHRONICLE_CLONE_HINT,
     "memex8": (
         "Run `docker compose up -d qdrant memex8` from Ex8-ca/memex8 and set "
         "MEMEX8_URL / MEMEX8_API_KEY."
     ),
 }
 
-#: Providers whose store this repo implements directly rather than delegating
-#: to an external service. Nachos is text-only and local-first, so a SQLite
-#: corpus with a lexical scorer *is* the provider.
-LOCAL_STORE_PROVIDERS = frozenset({"nachos"})
+
+def _nachos_store(
+    adapter: MemoryProviderAdapter, workspace_dir: str | Path
+) -> MemoryStore:
+    """Nachos is text-only, local-first, ``scorer="lexical"`` — so a SQLite
+    corpus with a lexical scorer *is* the provider, not a stand-in for it."""
+    root = Path(workspace_dir) / "nachos_home" / "nachos"
+    return LexicalMemoryStore(root / "memories.db")
+
+
+def _chronicle_store(
+    adapter: MemoryProviderAdapter, workspace_dir: str | Path
+) -> MemoryStore:
+    """The real Chronicle engine, off a checkout, under an ephemeral home.
+
+    Chronicle is a stdlib-only local-first plugin rather than a service, so
+    "provisioned" means a clone is on disk; without one the store is
+    unprovisioned and says how to get it.
+    """
+    root = chronicle_repo_root(getattr(adapter, "repo_root", None))
+    if root is None:
+        return UnprovisionedStore(adapter.name, PROVISIONING_HINTS["chronicle"])
+    return ChronicleStore(chronicle_home(workspace_dir), repo_root=root)
+
+
+#: Providers this repo can answer locally, and what answers them. Everything
+#: absent from here is a separate service that must be running.
+LOCAL_STORE_BUILDERS: dict[str, Callable[[MemoryProviderAdapter, str | Path], MemoryStore]] = {
+    "nachos": _nachos_store,
+    "chronicle": _chronicle_store,
+}
+
+#: Provider ids with a local store. Kept as a name because it reads better at
+#: call sites than ``in LOCAL_STORE_BUILDERS``.
+LOCAL_STORE_PROVIDERS = frozenset(LOCAL_STORE_BUILDERS)
 
 
 def store_for(
@@ -100,9 +137,9 @@ def store_for(
     consolidation growth. It is resolved rather than created here: ``setup()``
     runs later, when the session runner starts the scenario.
     """
-    if adapter.name in LOCAL_STORE_PROVIDERS:
-        root = Path(workspace_dir) / "nachos_home" / "nachos"
-        return LexicalMemoryStore(root / "memories.db")
+    builder = LOCAL_STORE_BUILDERS.get(adapter.name)
+    if builder is not None:
+        return builder(adapter, workspace_dir)
     return UnprovisionedStore(
         adapter.name, PROVISIONING_HINTS.get(adapter.name, "")
     )
