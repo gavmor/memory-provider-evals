@@ -31,6 +31,7 @@ from memory_provider_evals.mcp_server import (
 )
 from memory_provider_evals.memory_store import (
     LexicalMemoryStore,
+    Memex8MemoryStore,
     UnprovisionedStore,
 )
 
@@ -102,20 +103,24 @@ def test_nachos_gets_a_real_local_store_under_its_own_workspace(tmp_path):
     assert store.db_path.parent == tmp_path / "nachos_home" / "nachos"
 
 
-@pytest.mark.parametrize("adapter_cls", [CashewAdapter, ChronicleAdapter, Memex8Adapter])
+@pytest.mark.parametrize("adapter_cls", [CashewAdapter, ChronicleAdapter])
 def test_service_backed_providers_get_an_unprovisioned_store(adapter_cls, tmp_path):
     store = store_for(adapter_cls(dry_run=True), tmp_path)
     assert isinstance(store, UnprovisionedStore)
     assert store.provisioning_hint
 
 
+def test_memex8_gets_a_rest_backed_store(tmp_path):
+    store = store_for(Memex8Adapter(dry_run=True), tmp_path)
+    assert isinstance(store, Memex8MemoryStore)
+
+
 def test_calling_an_unprovisioned_tool_surfaces_the_provisioning_step(tmp_path):
-    adapter = Memex8Adapter(dry_run=True)
+    adapter = CashewAdapter(dry_run=True)
     server, _store = memory_server_for(adapter, tmp_path)
-    result = _call(server, "memex8_search", {"query": "what do I drive"})
+    result = _call(server, "cashew_query", {"query": "what do I drive"})
     assert result.is_error
     assert "not provisioned" in _text(result)
-    assert "docker compose" in _text(result)
 
 
 # -- the tools the agent actually calls -------------------------------------

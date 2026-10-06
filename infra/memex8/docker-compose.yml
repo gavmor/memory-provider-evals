@@ -1,0 +1,58 @@
+# Benchmark-local memex8 stack.
+#
+# Derived from upstream Ex8-ca/memex8/docker-compose.yml but stripped for
+# benchmark use: no host file-watching, no Ollama, no bind-mounted ~/.memex8.
+# Uses the pre-built memex8:bench image instead of `build: .`.
+#
+# The adapter starts this via `docker compose -f <this file> up -d qdrant memex8`
+# and tears it down with `docker compose -f <this file> down -v` (the -v drops
+# the named Qdrant volume so each benchmark suite starts from empty).
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.14.0
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  memex8:
+    image: memex8:bench
+    user: "1000:1000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+    volumes:
+      - memex8_data:/var/lib/memex8
+    env_file:
+      - .env.memex8
+    environment:
+      - HOME=/home/memex8
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-ollama}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-768}
+      - QDRANT_URL=http://qdrant:6334
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - RUST_LOG=info
+      - TURBOVEC_INDEX_PATH=/var/lib/memex8/data/memories.tv
+      - TURBOVEC_ID_MAP_PATH=/var/lib/memex8/data/memories_ids.json
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+volumes:
+  qdrant_data:
+  memex8_data:

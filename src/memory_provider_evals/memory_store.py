@@ -23,15 +23,19 @@ Two implementations, for two honestly different situations:
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
     "BackendNotProvisioned",
     "LexicalMemoryStore",
+    "Memex8MemoryStore",
     "MemoryStore",
     "UnprovisionedStore",
 ]
@@ -192,3 +196,82 @@ class LexicalMemoryStore:
                 "SELECT text FROM memories ORDER BY stored_at DESC, id DESC"
             ).fetchall()
         return [row[0] for row in rows]
+
+
+class Memex8MemoryStore:
+    """REST-backed store calling a live memex8 daemon.
+
+    Endpoints (upstream Ex8-ca/memex8 REST API):
+    - POST /api/v1/memories          — store a new memory
+    - POST /api/v1/memories/search   — semantic search
+    - DELETE /api/v1/memories/{id}   — delete by id
+    - GET /api/v1/health             — health check (no auth)
+
+    All endpoints except /health require ``Authorization: Bearer <key>``.
+    """
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8080",
+        api_key: str = "",
+        timeout: float = 30.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+    ) -> Any:
+        url = f"{self.base_url}{path}"
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Content-Type", "application/json")
+        if self.api_key:
+            req.add_header("Authorization", f"Bearer {self.api_key}")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as exc:
+            body_text = exc.read().decode(errors="replace")
+            raise BackendNotProvisioned(
+                f"memex8 {method} {path} returned {exc.code}: {body_text}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise BackendNotProvisioned(
+                f"memex8 unreachable at {self.base_url}: {exc.reason}"
+            ) from exc
+
+    def put(self, text: str, tags: list[str] | None = None) -> str:
+        payload: dict[str, Any] = {"content": text}
+        if tags:
+            payload["tags"] = tags
+        result = self._request("POST", "/api/v1/memories", payload)
+        # Upstream returns the created memory object with an "id" field.
+        return str(result.get("id", ""))
+
+    def recall(self, query: str, limit: int = 5) -> list[str]:
+        result = self._request(
+            "POST",
+            "/api/v1/memories/search",
+            {"query": query, "limit": limit},
+        )
+        # Upstream returns a list of memory objects; extract the content.
+        if isinstance(result, list):
+            return [str(m.get("content", m.get("text", ""))) for m in result[:limit]]
+        # Some versions nest under a "results" or "memories" key.
+        if isinstance(result, dict):
+            items = result.get("results", result.get("memories", []))
+            return [str(m.get("content", m.get("text", ""))) for m in items[:limit]]
+        return []
+
+    def remove(self, entry_id: str) -> bool:
+        try:
+            self._request("DELETE", f"/api/v1/memories/{entry_id}")
+            return True
+        except BackendNotProvisioned:
+            return False

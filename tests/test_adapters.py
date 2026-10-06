@@ -66,7 +66,7 @@ def test_memex8_compose_and_slumber(tmp_path):
 
     a.trigger_consolidation()
     posts = [d for k, d in a.actions if k == "http_post"]
-    assert posts[-1]["url"].endswith("/api/v1/slumber")
+    assert posts[-1]["url"].endswith("/api/v1/slumber/trigger")
 
     a.teardown()
     down = [d for k, d in a.actions if k == "exec"][-1]

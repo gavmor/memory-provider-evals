@@ -40,6 +40,7 @@ from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 from memory_provider_evals.memory_store import (
     BackendNotProvisioned,
     LexicalMemoryStore,
+    Memex8MemoryStore,
     MemoryStore,
     UnprovisionedStore,
 )
@@ -103,6 +104,14 @@ def store_for(
     if adapter.name in LOCAL_STORE_PROVIDERS:
         root = Path(workspace_dir) / "nachos_home" / "nachos"
         return LexicalMemoryStore(root / "memories.db")
+    if adapter.name == "memex8":
+        import os
+
+        return Memex8MemoryStore(
+            base_url=getattr(adapter, "base_url", "http://localhost:8080"),
+            api_key=getattr(adapter, "api_key", "")
+            or os.environ.get("MEMEX8_API_KEY", ""),
+        )
     return UnprovisionedStore(
         adapter.name, PROVISIONING_HINTS.get(adapter.name, "")
     )

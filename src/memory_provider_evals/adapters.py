@@ -234,11 +234,16 @@ class Memex8Adapter(MemoryProviderAdapter):
         self,
         compose_file: str | Path | None = None,
         base_url: str = "http://localhost:8080",
-        slumber_path: str = "/api/v1/slumber",
+        slumber_path: str = "/api/v1/slumber/trigger",
         api_key: str | None = None,
         dry_run: bool = False,
     ) -> None:
         super().__init__(dry_run=dry_run)
+        # Default to the vendored compose file shipped with the benchmark.
+        if compose_file is None:
+            vendored = Path(__file__).resolve().parents[2] / "infra" / "memex8" / "docker-compose.yml"
+            if vendored.is_file():
+                compose_file = vendored
         self.compose_file = Path(compose_file) if compose_file else None
         self.base_url = base_url.rstrip("/")
         self.slumber_path = slumber_path

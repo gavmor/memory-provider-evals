@@ -22,3 +22,4 @@ temp_test_run_data.json
 # Secrets
 .env
 .env.local
+.env.memex8
