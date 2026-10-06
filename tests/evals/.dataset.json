@@ -1,0 +1,60 @@
+[
+  {
+    "name": "belief_revision_vehicle",
+    "scenario": "Across three isolated sessions a user states a fact, later corrects it, and finally probes the assistant for the current value. The assistant's conversation history does not carry across sessions, so the correct answer can only come from the durable memory provider.",
+    "expected_outcome": "In the final session the assistant answers that the user drives a Tesla Model 3, and never presents the Honda Civic as the user's current vehicle.",
+    "user_description": "A returning user who corrects a previously stated personal fact and expects the assistant to honour the correction in a later session.",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I drive a Honda Civic.",
+        "metadata": { "session_id": "s1" }
+      },
+      {
+        "role": "user",
+        "content": "Actually, I drive a Tesla Model 3 now.",
+        "metadata": { "session_id": "s2" }
+      },
+      {
+        "role": "user",
+        "content": "What do I drive?",
+        "metadata": { "session_id": "s3" }
+      }
+    ],
+    "additional_metadata": {
+      "current_fact": "Tesla Model 3",
+      "superseded_facts": ["Honda Civic"],
+      "max_token_overhead_ratio": 0.5
+    },
+    "comments": "Exercises temporal invalidation, contradiction rejection, recall F1 and token overhead."
+  },
+  {
+    "name": "multi_hop_cross_session",
+    "scenario": "A user introduces one entity in an early session and a related entity in a later session, then asks a question that can only be answered by joining facts first stated in different sessions.",
+    "expected_outcome": "The assistant connects the vehicle purchased in Toronto with Alice's relocation to Berlin, answering from retrieved memory that spans both sessions rather than from a single session's context.",
+    "user_description": "A user who expects the assistant to join facts it learned at different times.",
+    "turns": [
+      {
+        "role": "user",
+        "content": "I bought my Tesla in Toronto, and my colleague Alice helped me pick it out.",
+        "metadata": { "session_id": "s1" }
+      },
+      {
+        "role": "user",
+        "content": "Alice moved to Berlin last month.",
+        "metadata": { "session_id": "s2" }
+      },
+      {
+        "role": "user",
+        "content": "Where does the colleague who helped me buy my car live now?",
+        "metadata": { "session_id": "s3" }
+      }
+    ],
+    "additional_metadata": {
+      "current_fact": "Berlin",
+      "multi_hop_entities": ["Tesla", "Berlin"],
+      "max_token_overhead_ratio": 0.5
+    },
+    "comments": "Requires retrievals spanning >= 2 distinct session_ids."
+  }
+]

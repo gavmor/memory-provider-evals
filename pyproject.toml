@@ -1,0 +1,38 @@
+[project]
+name = "memory-provider-evals"
+version = "0.1.0"
+description = "DeepEval suite benchmarking Hermes durable-memory providers on the traced-harness instrument"
+readme = "README.md"
+authors = [
+    { name = "Gavin Morgan", email = "hello@gavmor.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "traced-harness>=0.1.0",
+    "deepeval>=4.2.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.9.0",
+]
+
+# traced-harness is not published to PyPI; consume it from the sibling checkout.
+[tool.uv.sources]
+traced-harness = { path = "../traced-harness", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "evals: end-to-end DeepEval suites needing a live model and a provisioned memory backend",
+]
+# Bare `pytest` runs the unit suite only. Run the eval suite explicitly:
+#   deepeval test run tests/evals/test_memory_providers.py -m evals
+addopts = "-m 'not evals'"

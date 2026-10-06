@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Test / eval artifacts
+.pytest_cache/
+.ruff_cache/
+
+# Memory-eval run workspaces (provider stores + JSONL traces)
+tests/evals/.runs/
+
+# DeepEval local state
+.deepeval/
+.deepeval-cache.json
+temp_test_run_data.json
+
+# Secrets
+.env
+.env.local
