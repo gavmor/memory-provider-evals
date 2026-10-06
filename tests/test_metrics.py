@@ -264,3 +264,27 @@ def test_build_adapter_rejects_unknown_provider():
     with pytest.raises(ValueError, match="Unknown memory provider"):
         build_adapter("not-a-provider")
     assert build_adapter("cashew").name == "cashew"
+
+
+def test_judge_params_are_all_renderable_by_conversational_geval():
+    """ConversationalGEval renders only a fixed set of MultiTurnParams.
+
+    Passing an unsupported one (CONTEXT, USER_DESCRIPTION, CHATBOT_ROLE, ...)
+    raises KeyError deep inside scoring, long after the suite looks healthy.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent / "evals"))
+    import metrics as eval_metrics
+    from deepeval.metrics.g_eval.utils import CONVERSATIONAL_G_EVAL_PARAMS
+
+    unsupported = [
+        p.name
+        for p in eval_metrics._JUDGE_PARAMS
+        if p not in CONVERSATIONAL_G_EVAL_PARAMS
+    ]
+    assert not unsupported, (
+        f"ConversationalGEval cannot render {unsupported}; "
+        "scoring would fail with KeyError at runtime."
+    )

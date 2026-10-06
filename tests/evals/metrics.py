@@ -43,19 +43,25 @@ from memory_provider_evals.metrics import (
     MultiHopRetrievalMetric,
 )
 
-# Params the judges may read. Every one of these is populated by
-# memory_provider_evals.bridge.conversational_test_case_from_trace().
+# Params the judges may read. ConversationalGEval renders only a fixed set of
+# MultiTurnParams — CONTEXT is NOT among them (it raises KeyError at scoring
+# time), while METADATA is. The expectations therefore reach the judge through
+# ConversationalTestCase.metadata["expectations"], which
+# memory_provider_evals.bridge populates from the golden.
 _JUDGE_PARAMS = [
     MultiTurnParams.ROLE,
     MultiTurnParams.CONTENT,
     MultiTurnParams.RETRIEVAL_CONTEXT,
-    MultiTurnParams.CONTEXT,
+    MultiTurnParams.METADATA,
     MultiTurnParams.SCENARIO,
     MultiTurnParams.EXPECTED_OUTCOME,
 ]
 
 _TEMPORAL_INVALIDATION_STEPS = [
-    "Read CONTEXT to identify the SUPERSEDED FACTS and the CURRENT FACT.",
+    (
+        "Read METADATA['expectations'] to identify `superseded_facts` and "
+        "`current_fact`."
+    ),
     (
         "Scan every assistant turn and every retrieval_context passage "
         "across the whole conversation."
@@ -77,7 +83,10 @@ _TEMPORAL_INVALIDATION_STEPS = [
 ]
 
 _CONTRADICTION_REJECTION_STEPS = [
-    "Read CONTEXT to identify the SUPERSEDED FACTS and the CURRENT FACT.",
+    (
+        "Read METADATA['expectations'] to identify `superseded_facts` and "
+        "`current_fact`."
+    ),
     (
         "Look only at the FINAL assistant turn and the retrieval_context "
         "that supported it."
