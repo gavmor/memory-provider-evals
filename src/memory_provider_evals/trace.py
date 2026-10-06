@@ -190,11 +190,18 @@ class TraceRecord:
         return texts
 
     def consolidation_records(self) -> list[dict[str, Any]]:
+        """Inter-session consolidation measurements, newest harness key first.
+
+        ``traced_harness.SessionRunner`` records this under the generic
+        ``between_sessions`` key; ``consolidation`` is accepted for traces
+        written before the harness was made domain-agnostic.
+        """
         out: list[dict[str, Any]] = []
         for turn in self.turns:
-            cons = self._mem(turn).get("consolidation")
-            if isinstance(cons, dict):
-                out.append(cons)
+            mem = self._mem(turn)
+            rec = mem.get("between_sessions") or mem.get("consolidation")
+            if isinstance(rec, dict):
+                out.append(rec)
         return out
 
     def injected_tokens_total(self) -> int:

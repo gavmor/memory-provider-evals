@@ -93,3 +93,18 @@ tests/
     .dataset.json        # committed scripted scenarios
     test_memory_providers.py
 ```
+
+## What comes from the harness
+
+`traced-harness` treats memory as a first-class peripheral alongside MCP and
+skills, so this repo does **not** redefine it. From `traced_harness.memory`:
+
+- `MemoryProviderAdapter` — the lifecycle ABC our four adapters subclass
+- `MemoryToolContract` — tools, context hooks, system-prompt contract
+- `retrieval_span`, `record_memory_injection`, `consolidation_span` — telemetry
+- `register_memory_tools`, `build_memory_instructions` — agent prompt wiring
+- `make_memory_session_runner` — a `SessionRunner` pre-wired with the memory
+  metadata key and span name
+
+The harness *core* stays domain-blind: `SessionRunner` depends only on a
+structural `PeripheralLifecycle` protocol and never imports the memory module.

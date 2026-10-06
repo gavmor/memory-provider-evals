@@ -1,16 +1,16 @@
 """Concrete Hermes memory-provider adapters: the subjects under study.
 
 Each adapter wraps a real, third-party Hermes memory plugin and implements the
-``MemoryPluginAdapter`` lifecycle contract supplied by ``traced_harness``:
+``MemoryProviderAdapter`` lifecycle contract supplied by ``traced_harness``:
 
 * ``CashewAdapter``    -> magnus919/hermes-cashew (Cashew thought-graph, SQLite)
 * ``ChronicleAdapter`` -> indigokarasu/chronicle-agent-context-and-memory
 * ``Memex8Adapter``    -> Ex8-ca/memex8 (Rust daemon + Qdrant via docker compose)
 * ``NachosAdapter``    -> Nacho-Labs-LLC/hermes-plugin-nachos (text context engine)
 
-These live in the study repo rather than the harness: the harness defines what a
-memory peripheral *is* (the ABC), while which providers are being benchmarked is
-a property of this particular study.
+These live in the study repo rather than the harness: the harness defines what
+a memory peripheral *is* (the ABC, telemetry, and prompt wiring), while *which*
+providers are being benchmarked is a property of this particular study.
 
 Fidelity / verification note
 ----------------------------
@@ -42,7 +42,7 @@ import urllib.error
 from pathlib import Path
 from typing import Any
 
-from traced_harness.plugins import MemoryPluginAdapter, MemoryToolContract
+from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
 __all__ = [
     "ADAPTERS",
@@ -57,7 +57,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Cashew — magnus919/hermes-cashew
 # ---------------------------------------------------------------------------
-class CashewAdapter(MemoryPluginAdapter):
+class CashewAdapter(MemoryProviderAdapter):
     """Cashew thought-graph memory (SQLite + sentence-transformers).
 
     ``setup`` writes a *sandboxed* ``cashew.json`` (under the workspace, not the
@@ -134,7 +134,7 @@ class CashewAdapter(MemoryPluginAdapter):
 # ---------------------------------------------------------------------------
 # Chronicle — indigokarasu/chronicle-agent-context-and-memory
 # ---------------------------------------------------------------------------
-class ChronicleAdapter(MemoryPluginAdapter):
+class ChronicleAdapter(MemoryProviderAdapter):
     """Chronicle local-first memory (SQLite + local vector store).
 
     ``setup`` points Chronicle's engine at temporary SQLite and vector-store
@@ -219,7 +219,7 @@ class ChronicleAdapter(MemoryPluginAdapter):
 # ---------------------------------------------------------------------------
 # Memex8 — Ex8-ca/memex8
 # ---------------------------------------------------------------------------
-class Memex8Adapter(MemoryPluginAdapter):
+class Memex8Adapter(MemoryProviderAdapter):
     """Memex8 (Rust daemon + Qdrant) started via ``docker compose``.
 
     ``trigger_consolidation`` POSTs to the Slumber endpoint, running the 13-phase
@@ -293,7 +293,7 @@ class Memex8Adapter(MemoryPluginAdapter):
 # ---------------------------------------------------------------------------
 # Nachos — Nacho-Labs-LLC/hermes-plugin-nachos
 # ---------------------------------------------------------------------------
-class NachosAdapter(MemoryPluginAdapter):
+class NachosAdapter(MemoryProviderAdapter):
     """Nachos durable-memory / context engine (text-only, local-first).
 
     Three-tier assembly: always-on manifest, bounded prefetch, explicit recall.
@@ -377,7 +377,7 @@ class NachosAdapter(MemoryPluginAdapter):
         )
 
 #: Provider id -> adapter class, for ``MEMORY_PROVIDER`` selection.
-ADAPTERS: dict[str, type[MemoryPluginAdapter]] = {
+ADAPTERS: dict[str, type[MemoryProviderAdapter]] = {
     CashewAdapter.name: CashewAdapter,
     ChronicleAdapter.name: ChronicleAdapter,
     Memex8Adapter.name: Memex8Adapter,
@@ -385,7 +385,7 @@ ADAPTERS: dict[str, type[MemoryPluginAdapter]] = {
 }
 
 
-def build_adapter(provider: str, **kwargs: Any) -> MemoryPluginAdapter:
+def build_adapter(provider: str, **kwargs: Any) -> MemoryProviderAdapter:
     """Instantiate the adapter for ``provider`` (see :data:`ADAPTERS`)."""
     try:
         cls = ADAPTERS[provider]

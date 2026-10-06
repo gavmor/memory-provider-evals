@@ -37,13 +37,11 @@ from deepeval.dataset import ConversationalGolden
 from deepeval.test_case import ConversationalTestCase, ToolCall, Turn
 from deepeval.test_case.llm_test_case import RetrievedContextData
 from traced_harness.eval import TraceTurn
-from traced_harness.plugins import MemoryPluginAdapter
-from traced_harness.session_runner import (
-    Scenario,
-    Session,
-    SessionRunner,
-    TurnExecutor,
+from traced_harness.memory import (
+    MemoryProviderAdapter,
+    make_memory_session_runner,
 )
+from traced_harness.session_runner import Scenario, Session, TurnExecutor
 
 from memory_provider_evals.metrics import (
     EXPECTATIONS_METADATA_KEY,
@@ -223,7 +221,7 @@ def conversational_test_case_from_trace(
 
 async def run_memory_scenario(
     golden: ConversationalGolden,
-    adapter: MemoryPluginAdapter,
+    adapter: MemoryProviderAdapter,
     turn_executor: TurnExecutor,
     workspace_dir: str | Path,
     trace_dir: str | Path | None = None,
@@ -231,17 +229,13 @@ async def run_memory_scenario(
 ) -> ConversationalTestCase:
     """Replay a golden against a live memory provider and return its test case.
 
-    This is the real app execution path: it drives the harness
-    :class:`SessionRunner`, which performs setup, runs every session in order
-    with an inter-session consolidation pass, and writes an enriched JSONL
-    trace.
+    This is the real app execution path: the harness's pre-wired memory runner
+    performs setup, runs every session in order with an inter-session
+    consolidation pass, and writes an enriched JSONL trace.
     """
     scenario = scenario_from_golden(golden)
-    runner = SessionRunner(
-        adapter=adapter,
-        turn_executor=turn_executor,
-        workspace_dir=workspace_dir,
-        trace_dir=trace_dir,
+    runner = make_memory_session_runner(
+        adapter, turn_executor, workspace_dir, trace_dir=trace_dir
     )
     try:
         result = await runner.run_scenario(scenario)

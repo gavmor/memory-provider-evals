@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from traced_harness.plugins import MemoryPluginAdapter
+from traced_harness.memory import MemoryProviderAdapter
 
 from memory_provider_evals.adapters import (
     CashewAdapter,
@@ -21,7 +21,7 @@ def _kinds(adapter):
 
 def test_abstract_adapter_cannot_instantiate():
     with pytest.raises(TypeError):
-        MemoryPluginAdapter()  # type: ignore[abstract]
+        MemoryProviderAdapter()  # type: ignore[abstract]
 
 
 def test_cashew_setup_consolidate_teardown(tmp_path):

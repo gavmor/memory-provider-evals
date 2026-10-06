@@ -1,8 +1,10 @@
 """DeepEval suite benchmarking Hermes durable-memory providers.
 
 Layered on the ``traced-harness`` instrument: the harness drives the agent,
-emits OpenTelemetry spans and JSONL traces; this package decides what "good
-memory" means and scores it with DeepEval.
+emits OpenTelemetry spans and JSONL traces, and provides first-class memory
+support (``MemoryProviderAdapter``, memory telemetry, prompt wiring). This
+package supplies the providers under test, defines what "good memory" means,
+and scores it with DeepEval.
 """
 
 from memory_provider_evals.adapters import (

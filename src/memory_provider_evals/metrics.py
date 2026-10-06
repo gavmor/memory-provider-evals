@@ -46,6 +46,7 @@ from deepeval.errors import MissingTestCaseParamsError
 from deepeval.metrics import BaseConversationalMetric
 from deepeval.metrics.utils import check_conversational_test_case_params
 from deepeval.test_case import ConversationalTestCase, MultiTurnParams
+from traced_harness.memory import MEMORY_METADATA_KEY
 
 from memory_provider_evals.trace import (
     connects_entities_across_sessions,
@@ -60,7 +61,6 @@ __all__ = [
     "MultiHopRetrievalMetric",
 ]
 
-MEMORY_METADATA_KEY = "memory"
 EXPECTATIONS_METADATA_KEY = "expectations"
 
 
