@@ -42,20 +42,35 @@ def test_cashew_setup_consolidate_teardown(tmp_path):
     assert "teardown" in _kinds(a)
 
 
-def test_chronicle_runs_real_maintenance_scripts(tmp_path):
+def test_chronicle_sandboxes_a_hermes_home_and_runs_its_own_consolidation(tmp_path):
+    """Upstream has no CHRONICLE_DB/CHRONICLE_VECTORS, and no consolidation
+    script: the sandbox knob is HERMES_HOME and the pass is the curation
+    queue. See ChronicleAdapter's docstring for what the three `scripts/*.py`
+    an earlier spec named actually do."""
     a = ChronicleAdapter(dry_run=True)
     info = a.setup(tmp_path)
-    assert info["contract"].tools == ["recall"]
-    assert len(info["store_paths"]) == 2  # sqlite + vector store
+    assert info["contract"].tools == ["chronicle_search"]
+    assert info["env"] == {"HERMES_HOME": str(tmp_path / "chronicle")}
+    # Vectors live inside the database, so there is one store path, and it is
+    # the directory holding the db plus its sidecars.
+    assert info["store_paths"] == [
+        str(tmp_path / "chronicle" / "commons" / "db" / "chronicle")
+    ]
 
     a.trigger_consolidation()
-    exec_cmds = [d for k, d in a.actions if k == "exec"]
-    scripts = [c[-1] for c in exec_cmds]
-    assert any("sweep_abstain.py" in s for s in scripts)
-    assert any("prune_vectors.py" in s for s in scripts)
-    assert any("writeback_vectors.py" in s for s in scripts)
-    # The spec's sweeps.py / reducer.py do not exist upstream.
-    assert not any("reducer.py" in s or s.endswith("sweeps.py") for s in scripts)
+    assert "consolidate" in _kinds(a)
+    # No subprocess at all: the pass runs in process against this run's store.
+    assert not any(k == "exec" for k, _ in a.actions)
+
+
+def test_chronicle_captures_turns_without_asking_the_agent_to_store(tmp_path):
+    """Chronicle's write path is capture, not a tool — so its contract names a
+    read tool and nothing else, and every tool it names is a retrieval."""
+    a = ChronicleAdapter(dry_run=True)
+    contract = a.setup(tmp_path)["contract"]
+    assert contract.recall_tools() == contract.tools
+    a.observe_turn("I drive a Tesla Model 3.", "Noted.", session_id="s1")
+    assert "observe_turn" in _kinds(a)
 
 
 def test_memex8_compose_and_slumber(tmp_path):

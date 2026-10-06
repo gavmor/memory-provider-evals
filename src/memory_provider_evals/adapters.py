@@ -18,20 +18,24 @@ The adapters are written against each project's *documented, real* entry points
 (verified against the upstream repositories, not invented):
 
 * Cashew consolidation really is ``plugins/memory/cashew/sleep_cron_script.py``.
-* Chronicle's consolidation scripts are ``scripts/sweep_abstain.py``,
-  ``scripts/prune_vectors.py`` and ``scripts/writeback_vectors.py`` (the task's
-  ``sweeps.py``/``reducer.py`` do not exist upstream).
+* Chronicle's consolidation is its curation queue + maintenance scheduler, run
+  in process (``ChronicleCore.tick``'s two halves). The ``scripts/*.py`` named
+  by earlier specs exist but are research/repair tools, not a consolidation
+  pass -- see :class:`ChronicleAdapter`.
 * Memex8 runs ``qdrant`` + ``memex8`` via ``docker compose`` and exposes a REST
   API on :8080; its consolidation ("Slumber") pipeline has **13** phases.
 * Nachos is text-only (manifest/prefetch/recall); it has no offline "sleep"
   pass -- consolidation is inline compaction + snapshotting.
 
-None of these backends are installed in this environment, so the adapters have
-**not** been exercised end-to-end against a live backend here. Every adapter
-supports ``dry_run=True``, which records the exact command / URL / config it
-*would* execute (available as ``.actions``) without touching an external
-process -- this is what the unit tests assert, and what you can use to
-smoke-test wiring before a real backend is provisioned.
+Chronicle is the one provider provisioned here: it is stdlib-only and runs
+local-first, so a checkout is enough (see
+:mod:`memory_provider_evals.chronicle_backend`) and its adapter has been
+exercised against the real engine. Cashew and Memex8 are not installed in this
+environment, so those two have **not** been exercised end-to-end against a live
+backend here. Every adapter supports ``dry_run=True``, which records the exact
+command / URL / config it *would* execute (available as ``.actions``) without
+touching an external process -- this is what the unit tests assert, and what
+you can use to smoke-test wiring before a real backend is provisioned.
 """
 
 from __future__ import annotations
@@ -43,6 +47,12 @@ from pathlib import Path
 from typing import Any
 
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
+
+from memory_provider_evals.chronicle_backend import (
+    ChronicleStore,
+    chronicle_db_path,
+    chronicle_home,
+)
 
 __all__ = [
     "ADAPTERS",
@@ -135,15 +145,48 @@ class CashewAdapter(MemoryProviderAdapter):
 # Chronicle — indigokarasu/chronicle-agent-context-and-memory
 # ---------------------------------------------------------------------------
 class ChronicleAdapter(MemoryProviderAdapter):
-    """Chronicle local-first memory (SQLite + local vector store).
+    """Chronicle event-sourced memory, run in process off a checkout.
 
-    ``setup`` points Chronicle's engine at temporary SQLite and vector-store
-    paths. ``trigger_consolidation`` runs Chronicle's real maintenance passes.
+    ``setup`` sandboxes Chronicle in an ephemeral ``HERMES_HOME`` under the
+    scenario workspace; :meth:`observe_turn` is its real per-turn capture;
+    :meth:`trigger_consolidation` is its real offline pass; ``teardown``
+    closes the store and deletes the home.
 
-    Spec correction: the task referenced ``sweeps.py`` / ``reducer.py`` — those
-    do not exist upstream. Chronicle's actual consolidation/maintenance scripts
-    live under ``scripts/`` (``sweep_abstain.py``, ``prune_vectors.py``,
-    ``writeback_vectors.py``); the engine itself is under ``engine/``.
+    Spec corrections, all verified against the upstream checkout rather than
+    inferred from the plugin's prose:
+
+    ``CHRONICLE_DB`` / ``CHRONICLE_VECTORS`` do not exist.
+        Nothing upstream reads either name. ``ChronicleCore`` derives its
+        database from ``hermes_home`` (``commons/db/chronicle/chronicle.db``)
+        and keeps vectors *in that database*, not in a directory beside it. So
+        the sandbox knob is ``HERMES_HOME``, and there is one store path to
+        purge, not two.
+
+    ``scripts/sweep_abstain.py``, ``prune_vectors.py``, ``writeback_vectors.py``
+        exist, but none of them is a consolidation pass, so an earlier spec's
+        correction (from the ``sweeps.py`` / ``reducer.py`` that never existed)
+        landed on the wrong three files:
+
+        * ``sweep_abstain.py`` is a LongMemEval parameter sweep. It takes an
+          ``oracle.json`` dataset, builds a fresh temp home per instance, and
+          prints a recommended ``retrieval.abstain_gate``. Between sessions it
+          would tune a threshold against a foreign dataset and never touch
+          this run's store.
+        * ``prune_vectors.py --db PATH`` deletes vectors for sessions matching
+          an exclusion prefix. Nothing here excludes a session, so it is a
+          no-op by construction.
+        * ``writeback_vectors.py`` is step 4 of an off-box re-embedding repair,
+          and requires a migrated copy plus a pre-built manifest.
+
+        What Chronicle actually calls consolidation is the curation queue plus
+        the maintenance scheduler — ``ChronicleCore.tick``'s two halves. That
+        is what :meth:`trigger_consolidation` runs, in process, against this
+        run's own store.
+
+    Capture is implicit.
+        Chronicle does not ask the agent to remember; ``CaptureEngine.observe``
+        appends each turn and extracts beliefs from it. The agent gets
+        ``chronicle_search`` and nothing else.
     """
 
     name = "chronicle"
@@ -151,67 +194,93 @@ class ChronicleAdapter(MemoryProviderAdapter):
     def __init__(
         self,
         repo_root: str | Path | None = None,
-        consolidation_scripts: list[str] | None = None,
-        db_env_var: str = "CHRONICLE_DB",
-        vectors_env_var: str = "CHRONICLE_VECTORS",
+        home_env_var: str = "HERMES_HOME",
         dry_run: bool = False,
     ) -> None:
         super().__init__(dry_run=dry_run)
         self.repo_root = Path(repo_root) if repo_root else None
-        self.consolidation_scripts = consolidation_scripts or [
-            "scripts/sweep_abstain.py",
-            "scripts/prune_vectors.py",
-            "scripts/writeback_vectors.py",
-        ]
-        self.db_env_var = db_env_var
-        self.vectors_env_var = vectors_env_var
+        self.home_env_var = home_env_var
+        self.hermes_home: Path | None = None
         self.db_path: Path | None = None
-        self.vectors_path: Path | None = None
+        self._store: ChronicleStore | None = None
+
+    def _chronicle(self) -> ChronicleStore:
+        """The store sharing this run's core (a singleton keyed by the home)."""
+        if self.hermes_home is None:
+            raise RuntimeError("ChronicleAdapter.setup() has not run yet.")
+        if self._store is None:
+            self._store = ChronicleStore(
+                self.hermes_home, repo_root=self.repo_root
+            )
+        return self._store
 
     def setup(self, workspace_dir: Path) -> dict[str, Any]:
-        root = Path(workspace_dir) / "chronicle"
-        root.mkdir(parents=True, exist_ok=True)
-        self.db_path = root / "chronicle.db"
-        self.vectors_path = root / "vectors"
-        self.vectors_path.mkdir(exist_ok=True)
+        self.hermes_home = chronicle_home(workspace_dir)
+        db_path = chronicle_db_path(self.hermes_home)
+        self.db_path = db_path
         self._record(
             "init_store",
-            {"db": str(self.db_path), "vectors": str(self.vectors_path)},
+            {"hermes_home": str(self.hermes_home), "db": str(db_path)},
         )
-        self.store_paths = [str(self.db_path), str(self.vectors_path)]
+        if not self.dry_run:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        # The directory, not the file: Chronicle writes WAL/shm sidecars and an
+        # optional sqlite-vec index beside the database, and consolidation
+        # byte-growth should see all of it.
+        self.store_paths = [str(db_path.parent)]
         return {
-            "env": {
-                self.db_env_var: str(self.db_path),
-                self.vectors_env_var: str(self.vectors_path),
-            },
+            "env": {self.home_env_var: str(self.hermes_home)},
             "contract": self.contract(),
             "store_paths": self.store_paths,
         }
 
+    def observe_turn(
+        self, user_content: str, assistant_content: str, session_id: str = ""
+    ) -> None:
+        """Capture one turn — Chronicle's write path, not the agent's.
+
+        Driven by :mod:`memory_provider_evals.live` after every turn, which is
+        where Hermes itself calls ``sync_turn``.
+        """
+        self._record("observe_turn", {"session_id": session_id})
+        if self.dry_run:
+            return
+        self._chronicle().observe(user_content, assistant_content, session_id)
+
     def trigger_consolidation(self) -> None:
-        env = os.environ.copy()
-        if self.db_path:
-            env[self.db_env_var] = str(self.db_path)
-        if self.vectors_path:
-            env[self.vectors_env_var] = str(self.vectors_path)
-        for script in self.consolidation_scripts:
-            script_path = (
-                str(self.repo_root / script) if self.repo_root else script
-            )
-            self._run(["python", script_path], env=env)
+        self._record("consolidate", self.name)
+        if self.dry_run:
+            return
+        jobs = self._chronicle().consolidate()
+        self._record("curation_jobs", jobs)
 
     def teardown(self) -> None:
-        self._purge(*(p for p in (self.db_path, self.vectors_path) if p))
+        if self._store is not None:
+            self._store.close()
+            self._store = None
+        if self.hermes_home and not self.dry_run:
+            self._purge(self.hermes_home)
         self._record("teardown", self.name)
 
     def contract(self) -> MemoryToolContract:
         return MemoryToolContract(
             provider=self.name,
-            tools=["recall"],
-            context_hooks=["chronicle_prefetch", "chronicle_compress"],
+            tools=["chronicle_search"],
+            # Named for what they are upstream: `ChronicleMemoryProvider`
+            # methods a Hermes host calls, not tools the agent can invoke.
+            # Neither is wired here — the harness has no pre-LLM injection
+            # point and no window to compress — so the prompt says what
+            # Chronicle does for the agent without it, and nothing more.
+            context_hooks=["pre_llm_call", "on_pre_compress"],
             system_prompt=(
-                "Chronicle supplies recalled context and manages compression. "
-                "Use `recall` for explicit lookups of earlier facts."
+                "Durable memory is provided by Chronicle, which records every "
+                "turn of every session automatically and extracts the facts "
+                "from them — you never have to decide to store anything. Each "
+                "session starts with an empty context window, so call "
+                "`chronicle_search` before answering any question about "
+                "something said earlier. It returns both consolidated beliefs "
+                "and the transcript lines behind them; when they disagree, "
+                "the most recent one is what is true now."
             ),
         )
 
