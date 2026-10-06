@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "traced-harness>=0.1.0",
     "deepeval>=4.2.8",
+    "benchkit-for-harnesses",
 ]
 
 [dependency-groups]
@@ -24,6 +25,7 @@ dev = [
 # refresh with `uv lock --upgrade-package traced-harness`.
 [tool.uv.sources]
 traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "main" }
+benchkit-for-harnesses = { git = "https://github.com/cartazio/benchkit_for_harnesses" }
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
