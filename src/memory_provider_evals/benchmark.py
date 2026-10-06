@@ -48,6 +48,8 @@ column            kind         meaning
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -71,12 +73,33 @@ from memory_provider_evals.trace import MemoryEvalSuite, TraceRecord, token_f1
 
 __all__ = [
     "BenchmarkReport",
+    "ExecutorFactory",
     "ScenarioResult",
     "bracket_instructed",
     "rank",
     "render_table",
     "run_provider_benchmark",
 ]
+
+#: Builds the turn executor for one scenario, scoped to that scenario's
+#: workspace. An async context manager so a live provider can hold an MCP
+#: connection open for the scenario and close it afterwards.
+ExecutorFactory = Callable[[Path], AbstractAsyncContextManager[TurnExecutor]]
+
+
+@asynccontextmanager
+async def _scenario_executor(
+    turn_executor: TurnExecutor | None,
+    executor_factory: ExecutorFactory | None,
+    scenario_workspace: Path,
+) -> AsyncIterator[TurnExecutor]:
+    """Yield the executor for one scenario, from whichever source was given."""
+    if executor_factory is None:
+        assert turn_executor is not None  # guarded by the caller
+        yield turn_executor
+        return
+    async with executor_factory(scenario_workspace) as executor:
+        yield executor
 
 
 def bracket_instructed(golden: ConversationalGolden) -> ConversationalGolden:
@@ -218,19 +241,33 @@ def _score(
 async def run_provider_benchmark(
     goldens: list[ConversationalGolden],
     adapter: MemoryProviderAdapter,
-    turn_executor: TurnExecutor,
-    workspace_dir: str | Path,
+    turn_executor: TurnExecutor | None = None,
+    workspace_dir: str | Path = ".",
     model: str = "",
     benchmark: str = "memorybench",
     output_dir: str | Path | None = None,
     reset_between: bool = True,
+    executor_factory: ExecutorFactory | None = None,
 ) -> BenchmarkReport:
     """Run every scenario against one provider, streaming a BenchKit archive.
 
-    Never raises on a scenario failure: a failed scenario becomes a record with
-    ``error`` set and ``correct=False``, so n-counts stay honest and one broken
-    provider cannot void the comparison.
+    Supply either ``turn_executor`` (one executor for the whole run — right
+    for a fake, or for a provider holding no per-scenario resources) or
+    ``executor_factory`` (one per scenario, scoped to that scenario's
+    workspace). A live provider needs the latter: its MCP connection and its
+    store belong to the scenario's workspace, and sharing them would let
+    scenario 2 recall what scenario 1 stored, which is exactly the leakage
+    the benchmark is meant to detect.
+
+    Never raises on a scenario failure: a failed scenario becomes a record
+    with ``error`` set and ``correct=False``, so n-counts stay honest and one
+    broken provider cannot void the comparison.
     """
+    if (turn_executor is None) == (executor_factory is None):
+        raise ValueError(
+            "Pass exactly one of turn_executor or executor_factory."
+        )
+
     out = Path(output_dir) if output_dir else runs_dir()
     report = BenchmarkReport(provider=adapter.name, model=model)
     desc = f"{benchmark}_{adapter.name}_{model or 'default'}"
@@ -242,12 +279,17 @@ async def run_provider_benchmark(
             meta = raw_golden.additional_metadata or {}
             target = str(meta.get("current_fact") or "")
             name = getattr(raw_golden, "name", None) or f"scenario_{idx}"
+            scenario_workspace = Path(workspace_dir) / name
             t0 = time.perf_counter()
-            runner = make_memory_session_runner(
-                adapter, turn_executor, Path(workspace_dir) / name
-            )
+            runner: Any = None
             try:
-                run = await runner.run_scenario(scenario_from_golden(golden))
+                async with _scenario_executor(
+                    turn_executor, executor_factory, scenario_workspace
+                ) as executor:
+                    runner = make_memory_session_runner(
+                        adapter, executor, scenario_workspace
+                    )
+                    run = await runner.run_scenario(scenario_from_golden(golden))
                 trace = TraceRecord.from_file(run.trace_file)
                 scored = _score(trace, raw_golden, adapter.name)
                 answer = str(scored.pop("_final_answer"))
@@ -287,7 +329,7 @@ async def run_provider_benchmark(
                     error=f"{type(exc).__name__}: {exc}",
                 )
             finally:
-                if reset_between:
+                if reset_between and runner is not None:
                     runner.reset_suite()
 
             report.results.append(result)

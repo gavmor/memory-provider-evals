@@ -368,11 +368,21 @@ class NachosAdapter(MemoryProviderAdapter):
                 "nachos_memory_put",
                 "nachos_memory_remove",
             ],
+            # Only recall reads memory; a put or a remove is not a retrieval,
+            # and counting one would inflate the column that proves the
+            # provider was consulted.
+            retrieval_tools=["nachos_memory_recall"],
             context_hooks=["nachos_manifest", "nachos_prefetch"],
             system_prompt=(
                 "Nachos provides durable memory via a manifest + bounded "
-                "prefetch. Call `nachos_memory_recall` to fetch full entries "
-                "when the manifest or prefetch is insufficient."
+                "prefetch. Every session starts with an empty context window, "
+                "so memory is the only thing that survives: call "
+                "`nachos_memory_put` to store each durable fact the user "
+                "states, phrased to stand alone without the conversation, and "
+                "call `nachos_memory_recall` before answering any question "
+                "about something the user told you earlier. When a stored "
+                "fact is superseded, `nachos_memory_remove` the stale entry "
+                "and put the new one."
             ),
         )
 

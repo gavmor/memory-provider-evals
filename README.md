@@ -92,11 +92,16 @@ maintain.
 
 ```
 src/memory_provider_evals/
-  adapters.py   # the four providers under study
-  trace.py      # TraceRecord + MemoryEvalSuite judges (metric internals)
-  metrics.py    # deterministic BaseConversationalMetric classes
-  bridge.py     # golden -> Scenario -> run -> ConversationalTestCase
-  ingest.py     # harness trace -> DeepEval LLMTestCase (single-turn)
+  adapters.py     # the four providers under study
+  memory_store.py # what answers a memory tool: a real lexical SQLite store
+                  # (Nachos) or an explicit "not provisioned" failure
+  mcp_server.py   # contract -> live MCP server exposing the provider's tools
+  live.py         # the wired run: server -> client -> create_agent(client=...)
+  trace.py        # TraceRecord + MemoryEvalSuite judges (metric internals)
+  metrics.py      # deterministic BaseConversationalMetric classes
+  benchmark.py    # comparative memorybench on BenchKit's measurement layer
+  bridge.py       # golden -> Scenario -> run -> ConversationalTestCase
+  ingest.py       # harness trace -> DeepEval LLMTestCase (single-turn)
 tests/
   evals/
     metrics.py           # metric instances (judge model built lazily)
@@ -104,17 +109,47 @@ tests/
     test_memory_providers.py
 ```
 
+## Running a live benchmark
+
+```
+export GEMINI_API_KEY=...
+uv run memorybench --provider nachos
+```
+
+`nachos` needs no external backend — its store is text-only and local-first,
+which is what `LexicalMemoryStore` implements. The other three providers raise
+`BackendNotProvisioned`, naming the provisioning step, until their service is
+running; that lands in the benchmark's `error` column rather than scoring as a
+provider that remembered nothing.
+
+`AGENT_MODEL_NAME` selects the agent model (default `gemini-flash-lite-latest`;
+the harness default `gemini-3.1-flash-lite-preview` returns 503s). The free
+Gemini tier allows 15 requests/minute, which a multi-scenario run can exceed.
+
+## Why the agent needs an MCP server
+
+`create_agent` registers a provider's tool *names* and injects its
+system-prompt contract, but the implementations arrive over the MCP `client`.
+Called without one, the agent is told it has `cashew_query` and then cannot
+call it — so it answers from the context window, which the multi-session
+design deliberately empties, and every provider scores identically badly for a
+reason unrelated to its memory. `mcp_server.py` + `live.py` close that loop:
+one server per provider contract, connected in process, passed as `client=`.
+
 ## What comes from the harness
 
 `traced-harness` treats memory as a first-class peripheral alongside MCP and
 skills, so this repo does **not** redefine it. From `traced_harness.memory`:
 
 - `MemoryProviderAdapter` — the lifecycle ABC our four adapters subclass
-- `MemoryToolContract` — tools, context hooks, system-prompt contract
+- `MemoryToolContract` — tools, retrieval tools, context hooks, prompt contract
 - `retrieval_span`, `record_memory_injection`, `consolidation_span` — telemetry
 - `register_memory_tools`, `build_memory_instructions` — agent prompt wiring
 - `make_memory_session_runner` — a `SessionRunner` pre-wired with the memory
   metadata key and span name
+- `make_memory_tool_hook`, `make_memory_turn_executor` — per-turn memory
+  telemetry: a timed span around each real recall call, and the turn's
+  injection overhead
 
 The harness *core* stays domain-blind: `SessionRunner` depends only on a
 structural `PeripheralLifecycle` protocol and never imports the memory module.
