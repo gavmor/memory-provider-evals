@@ -45,7 +45,6 @@ from deepeval import assert_test
 from deepeval.dataset import ConversationalGolden, EvaluationDataset
 
 from memory_provider_evals.adapters import build_adapter, default_provider
-from memory_provider_evals.bridge import run_memory_scenario
 
 # Deselected by bare `pytest` (addopts = -m "not evals"); run via deepeval.
 pytestmark = pytest.mark.evals
@@ -95,17 +94,13 @@ def test_memory_provider(golden: ConversationalGolden):
     provider = default_provider()
     adapter = build_adapter(provider)
 
-    from traced_harness.agent import create_agent
-    from traced_harness.session_runner import make_agno_turn_executor
+    from memory_provider_evals.live import run_live_scenario
 
-    async def _run():
-        agent = await create_agent(memory_adapter=adapter)
-        return await run_memory_scenario(
+    test_case = asyncio.run(
+        run_live_scenario(
             golden=golden,
             adapter=adapter,
-            turn_executor=make_agno_turn_executor(agent),
             workspace_dir=_workspace(golden),
         )
-
-    test_case = asyncio.run(_run())
+    )
     assert_test(test_case=test_case, metrics=METRICS)

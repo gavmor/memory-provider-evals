@@ -22,6 +22,17 @@ from memory_provider_evals.bridge import (
     scenario_from_golden,
 )
 from memory_provider_evals.ingest import to_deepeval_test_cases
+from memory_provider_evals.mcp_server import (
+    build_memory_server,
+    memory_server_for,
+    store_for,
+)
+from memory_provider_evals.memory_store import (
+    BackendNotProvisioned,
+    LexicalMemoryStore,
+    MemoryStore,
+    UnprovisionedStore,
+)
 from memory_provider_evals.metrics import (
     MemoryRecallF1Metric,
     MemoryTokenOverheadMetric,
@@ -31,19 +42,26 @@ from memory_provider_evals.trace import MemoryEvalSuite, TraceRecord
 
 __all__ = [
     "ADAPTERS",
+    "BackendNotProvisioned",
     "CashewAdapter",
     "ChronicleAdapter",
+    "LexicalMemoryStore",
     "Memex8Adapter",
     "MemoryEvalSuite",
     "MemoryRecallF1Metric",
+    "MemoryStore",
     "MemoryTokenOverheadMetric",
     "MultiHopRetrievalMetric",
     "NachosAdapter",
     "TraceRecord",
+    "UnprovisionedStore",
     "build_adapter",
+    "build_memory_server",
     "conversational_test_case_from_trace",
     "default_provider",
+    "memory_server_for",
     "run_memory_scenario",
     "scenario_from_golden",
+    "store_for",
     "to_deepeval_test_cases",
 ]

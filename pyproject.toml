@@ -20,11 +20,18 @@ dev = [
     "ruff>=0.9.0",
 ]
 
+[project.scripts]
+memorybench = "memory_provider_evals.live:main"
+
 # traced-harness is not published to PyPI; consume it from GitHub.
 # uv.lock pins the exact resolved commit, so builds stay reproducible;
 # refresh with `uv lock --upgrade-package traced-harness`.
+#
+# TEMPORARY: pinned to the branch carrying TurnResult.metadata and the memory
+# tool hook (gavmor/traced-harness `feat/memory-telemetry-and-tools`). Flip
+# back to `branch = "main"` and re-lock once that PR merges.
 [tool.uv.sources]
-traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "main" }
+traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "feat/memory-telemetry-and-tools" }
 benchkit-for-harnesses = { git = "https://github.com/cartazio/benchkit_for_harnesses" }
 
 [build-system]

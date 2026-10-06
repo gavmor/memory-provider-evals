@@ -12,6 +12,7 @@ build/
 
 # Memory-eval run workspaces (provider stores + JSONL traces)
 tests/evals/.runs/
+.runs/
 
 # DeepEval local state
 .deepeval/

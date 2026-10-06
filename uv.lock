@@ -1406,7 +1406,7 @@ dev = [
 requires-dist = [
     { name = "benchkit-for-harnesses", git = "https://github.com/cartazio/benchkit_for_harnesses" },
     { name = "deepeval", specifier = ">=4.2.8" },
-    { name = "traced-harness", git = "https://github.com/gavmor/traced-harness?branch=main" },
+    { name = "traced-harness", git = "https://github.com/gavmor/traced-harness?branch=feat%2Fmemory-telemetry-and-tools" },
 ]
 
 [package.metadata.requires-dev]
@@ -2702,7 +2702,7 @@ wheels = [
 [[package]]
 name = "traced-harness"
 version = "0.1.0"
-source = { git = "https://github.com/gavmor/traced-harness?branch=main#838b0aa2d895151788b634d0c6bd17ffc4550391" }
+source = { git = "https://github.com/gavmor/traced-harness?branch=feat%2Fmemory-telemetry-and-tools#360b8966c18d75c970ea50efd324984074256b83" }
 dependencies = [
     { name = "agno" },
     { name = "google-genai" },

@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pytest
 from benchkit_for_harnesses.brackets import ANSWER_INSTRUCTION
 from deepeval.dataset import ConversationalGolden
 from deepeval.test_case import Turn
@@ -248,6 +250,84 @@ def test_render_table_flags_incomparable_providers():
 
 def test_render_table_omits_note_when_all_clean():
     assert "not comparable" not in render_table([_report("a", 1.0, False, 0.1)])
+
+
+# -- executor sourcing ------------------------------------------------------
+def test_exactly_one_executor_source_is_required(tmp_path):
+    """Two sources, or none, is a wiring bug — not something to guess at."""
+    for kwargs in (
+        {},
+        {
+            "turn_executor": _executor("x"),
+            "executor_factory": _factory_for(_executor("x")),
+        },
+    ):
+        with pytest.raises(ValueError, match="exactly one"):
+            asyncio.run(
+                run_provider_benchmark(
+                    goldens=[GOLDEN],
+                    adapter=_FakeProvider("p"),
+                    workspace_dir=tmp_path,
+                    output_dir=tmp_path / "archives",
+                    **kwargs,
+                )
+            )
+
+
+def _factory_for(executor):
+    seen: list[Path] = []
+
+    @asynccontextmanager
+    async def _factory(scenario_workspace: Path):
+        seen.append(scenario_workspace)
+        yield executor
+
+    _factory.seen = seen  # type: ignore[attr-defined]
+    return _factory
+
+
+def test_executor_factory_is_scoped_to_each_scenarios_workspace(tmp_path):
+    """A live provider's store belongs to the scenario, not to the run.
+
+    Sharing one across scenarios would let scenario 2 recall what scenario 1
+    stored — the exact leakage this benchmark exists to detect.
+    """
+    factory = _factory_for(_executor("{[{[Tesla Model 3]}]}"))
+    rep = asyncio.run(
+        run_provider_benchmark(
+            goldens=[GOLDEN, GOLDEN],
+            adapter=_FakeProvider("scoped"),
+            executor_factory=factory,
+            workspace_dir=tmp_path / "scoped",
+            model="fake-model",
+            output_dir=tmp_path / "archives",
+        )
+    )
+    assert rep.n == 2
+    assert rep.accuracy == 1.0
+    assert factory.seen == [  # type: ignore[attr-defined]
+        tmp_path / "scoped" / "belief_revision_vehicle"
+    ] * 2
+
+
+def test_a_factory_that_cannot_connect_becomes_a_record_not_an_exception(tmp_path):
+    @asynccontextmanager
+    async def _broken(scenario_workspace: Path):
+        raise RuntimeError("memex8 backend not provisioned")
+        yield  # pragma: no cover - unreachable, satisfies the generator shape
+
+    rep = asyncio.run(
+        run_provider_benchmark(
+            goldens=[GOLDEN],
+            adapter=_FakeProvider("unreachable"),
+            executor_factory=_broken,
+            workspace_dir=tmp_path / "unreachable",
+            model="fake-model",
+            output_dir=tmp_path / "archives",
+        )
+    )
+    assert rep.n_errors == 1
+    assert "not provisioned" in (rep.results[0].error or "")
 
 
 def test_hedging_answer_is_rejected(tmp_path):
