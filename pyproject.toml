@@ -13,6 +13,17 @@ dependencies = [
     "benchkit-for-harnesses",
 ]
 
+[project.optional-dependencies]
+# Cashew's real backend. An extra rather than a dependency: hermes-cashew
+# pulls cashew-brain, torch and sentence-transformers (several GB), and
+# cashew-brain claims the top-level `core`, `extractors`, `integration` and
+# `scripts` module names. Provision it deliberately with
+# `uv sync --extra cashew`; without it `MEMORY_PROVIDER=cashew` reports an
+# unprovisioned backend instead of scoring zero.
+cashew = [
+    "hermes-cashew>=0.10.2",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
@@ -33,6 +44,9 @@ memorybench = "memory_provider_evals.live:main"
 [tool.uv.sources]
 traced-harness = { git = "https://github.com/gavmor/traced-harness", branch = "feat/memory-telemetry-and-tools" }
 benchkit-for-harnesses = { git = "https://github.com/cartazio/benchkit_for_harnesses" }
+# Not on PyPI: its own `cashew-brain` dependency is a pinned direct URL, which
+# PyPI rejects. uv.lock pins the resolved commit, so the extra is reproducible.
+hermes-cashew = { git = "https://github.com/magnus919/hermes-cashew" }
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]

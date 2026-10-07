@@ -17,7 +17,10 @@ Fidelity / verification note
 The adapters are written against each project's *documented, real* entry points
 (verified against the upstream repositories, not invented):
 
-* Cashew consolidation really is ``plugins/memory/cashew/sleep_cron_script.py``.
+* Cashew's consolidation is ``sleep_adapter.run_sleep_cycle``, run in process.
+  ``plugins/memory/cashew/sleep_cron_script.py`` exists but is the *template*
+  for a generated cron script and refuses to run from the package -- see
+  :class:`CashewAdapter`.
 * Chronicle's consolidation is its curation queue + maintenance scheduler, run
   in process (``ChronicleCore.tick``'s two halves). The ``scripts/*.py`` named
   by earlier specs exist but are research/repair tools, not a consolidation
@@ -27,15 +30,15 @@ The adapters are written against each project's *documented, real* entry points
 * Nachos is text-only (manifest/prefetch/recall); it has no offline "sleep"
   pass -- consolidation is inline compaction + snapshotting.
 
-Chronicle is the one provider provisioned here: it is stdlib-only and runs
-local-first, so a checkout is enough (see
-:mod:`memory_provider_evals.chronicle_backend`) and its adapter has been
-exercised against the real engine. Cashew and Memex8 are not installed in this
-environment, so those two have **not** been exercised end-to-end against a live
-backend here. Every adapter supports ``dry_run=True``, which records the exact
-command / URL / config it *would* execute (available as ``.actions``) without
-touching an external process -- this is what the unit tests assert, and what
-you can use to smoke-test wiring before a real backend is provisioned.
+Cashew and Chronicle are the two provisioned here, and both have been exercised
+against their real engines: Chronicle is stdlib-only and runs off a checkout
+(:mod:`memory_provider_evals.chronicle_backend`), Cashew installs as an extra
+(``uv sync --extra cashew``, :mod:`memory_provider_evals.cashew_backend`).
+Memex8 is a separate service and has **not** been exercised end-to-end here.
+Every adapter supports ``dry_run=True``, which records the exact command / URL
+/ config it *would* execute (available as ``.actions``) without touching an
+external process -- this is what the unit tests assert, and what you can use to
+smoke-test wiring before a real backend is provisioned.
 """
 
 from __future__ import annotations
@@ -48,6 +51,14 @@ from typing import Any
 
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
+from memory_provider_evals.cashew_backend import (
+    CashewStore,
+    cashew_config,
+    cashew_db_path,
+    cashew_home,
+    cashew_store_paths,
+    write_cashew_config,
+)
 from memory_provider_evals.chronicle_backend import (
     ChronicleStore,
     chronicle_db_path,
@@ -68,75 +79,131 @@ __all__ = [
 # Cashew — magnus919/hermes-cashew
 # ---------------------------------------------------------------------------
 class CashewAdapter(MemoryProviderAdapter):
-    """Cashew thought-graph memory (SQLite + sentence-transformers).
+    """Cashew thought-graph memory, run in process off an installed backend.
 
-    ``setup`` writes a *sandboxed* ``cashew.json`` (under the workspace, not the
-    user's real ``~/.hermes/cashew.json`` — we never clobber the operator's
-    profile) pointing at an ephemeral SQLite brain database.
-    ``trigger_consolidation`` invokes Cashew's real sleep reconciliation entry
-    point, ``plugins/memory/cashew/sleep_cron_script.py``.
+    ``setup`` sandboxes Cashew in an ephemeral ``HERMES_HOME`` under the
+    scenario workspace; :meth:`observe_turn` is its real per-turn capture;
+    :meth:`trigger_consolidation` is its real sleep pass; ``teardown`` shuts
+    the provider down and deletes the home.
+
+    Spec corrections, all verified against the upstream checkout rather than
+    inferred from the plugin's prose. :mod:`memory_provider_evals.
+    cashew_backend` carries the evidence for each; in brief:
+
+    ``CASHEW_CONFIG`` does not exist.
+        ``cashew.json`` is read from ``$HERMES_HOME``, and ``cashew_db_path``
+        is resolved relative to it — absolute paths are rejected. So the
+        sandbox knob is ``HERMES_HOME``, as it is for Chronicle and Nachos,
+        and the config this adapter used to write (an absolute
+        ``database_path``, plus an ``offline`` flag that is not a key at all)
+        was discarded by ``load_config`` on the way in.
+
+    ``plugins.memory.cashew.sleep_cron_script`` is a template, not an entry point.
+        The module is real, but its ``_INSTALLATION_MARKER`` is filled in when
+        ``initialize()`` stages a copy into ``$HERMES_HOME/scripts``. Run as
+        ``python -m`` it refuses before doing any work, installed or not. The
+        consolidation pass is ``sleep_adapter.run_sleep_cycle``, run here in
+        process against this run's own store.
+
+    Capture is implicit.
+        Cashew does not ask the agent to remember: ``sync_turn`` hands every
+        turn to the extractor. The agent gets ``cashew_query`` and nothing
+        else — see :class:`~memory_provider_evals.cashew_backend.CashewStore`
+        for why ``cashew_extract`` is withheld.
     """
 
     name = "cashew"
 
     def __init__(
         self,
-        consolidation_cmd: list[str] | None = None,
-        config_env_var: str = "CASHEW_CONFIG",
-        embedding_model: str = "all-MiniLM-L6-v2",
+        home_env_var: str = "HERMES_HOME",
         dry_run: bool = False,
     ) -> None:
         super().__init__(dry_run=dry_run)
-        # Real upstream module path; overridable if installed elsewhere.
-        self.consolidation_cmd = consolidation_cmd or [
-            "python",
-            "-m",
-            "plugins.memory.cashew.sleep_cron_script",
-        ]
-        self.config_env_var = config_env_var
-        self.embedding_model = embedding_model
-        self.config_path: Path | None = None
+        self.home_env_var = home_env_var
+        self.hermes_home: Path | None = None
         self.db_path: Path | None = None
+        self._store: CashewStore | None = None
+
+    def _cashew(self) -> CashewStore:
+        """The store sharing this run's provider (a singleton keyed by home)."""
+        if self.hermes_home is None:
+            raise RuntimeError("CashewAdapter.setup() has not run yet.")
+        if self._store is None:
+            self._store = CashewStore.get(self.hermes_home)
+        return self._store
 
     def setup(self, workspace_dir: Path) -> dict[str, Any]:
-        root = Path(workspace_dir) / "cashew"
-        root.mkdir(parents=True, exist_ok=True)
-        self.db_path = root / "brain.db"
-        self.config_path = root / "cashew.json"
-        config = {
-            "database_path": str(self.db_path),
-            "embedding_model": self.embedding_model,
-            # Offline in CI: avoid the ~500MB model download on first recall.
-            "offline": True,
-        }
-        self._record("write_config", {"path": str(self.config_path), **config})
+        self.hermes_home = cashew_home(workspace_dir)
+        self.db_path = cashew_db_path(self.hermes_home)
+        self._record(
+            "init_store",
+            {
+                "hermes_home": str(self.hermes_home),
+                "db": str(self.db_path),
+                **cashew_config(),
+            },
+        )
         if not self.dry_run:
-            self.config_path.write_text(json.dumps(config, indent=2))
-        self.store_paths = [str(self.db_path)]
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            write_cashew_config(self.hermes_home)
+        # The two SQLite stores and their sidecars, named individually: the
+        # directory also holds the embedding model cache, and sampling that
+        # would book a 90MB model download as consolidation growth.
+        self.store_paths = cashew_store_paths(self.hermes_home)
         return {
-            "env": {self.config_env_var: str(self.config_path)},
+            "env": {self.home_env_var: str(self.hermes_home)},
             "contract": self.contract(),
             "store_paths": self.store_paths,
         }
 
+    def observe_turn(
+        self, user_content: str, assistant_content: str, session_id: str = ""
+    ) -> None:
+        """Capture one turn — Cashew's write path, not the agent's.
+
+        Driven by :mod:`memory_provider_evals.live` after every turn, which is
+        where Hermes itself calls ``sync_turn``.
+        """
+        self._record("observe_turn", {"session_id": session_id})
+        if self.dry_run:
+            return
+        self._cashew().observe(user_content, assistant_content, session_id)
+
     def trigger_consolidation(self) -> None:
-        env = os.environ.copy()
-        if self.config_path:
-            env[self.config_env_var] = str(self.config_path)
-        self._run(self.consolidation_cmd, env=env)
+        self._record("consolidate", self.name)
+        if self.dry_run:
+            return
+        self._record("sleep_cycle", self._cashew().consolidate())
 
     def teardown(self) -> None:
-        if self.config_path:
-            self._purge(self.config_path.parent)
+        if self._store is not None:
+            self._store.close()
+            self._store = None
+        if self.hermes_home and not self.dry_run:
+            self._purge(self.hermes_home)
         self._record("teardown", self.name)
 
     def contract(self) -> MemoryToolContract:
         return MemoryToolContract(
             provider=self.name,
             tools=["cashew_query"],
+            # Upstream names these as the Hermes host hooks it implements, not
+            # as tools the agent can invoke: ``prefetch`` warms context before
+            # a call and ``on_pre_compress`` turns a window about to be
+            # discarded into insight nodes. Neither is wired here — the
+            # harness has no pre-LLM injection point and no window to compress.
+            context_hooks=["prefetch", "on_pre_compress"],
             system_prompt=(
-                "Durable memory is provided by Cashew. Call `cashew_query` to "
-                "recall stored facts before answering from assumption."
+                "Durable memory is provided by Cashew, which records every "
+                "turn of every session automatically into a thought graph and "
+                "extracts the facts from it — you never have to decide to "
+                "store anything. Each session starts with an empty context "
+                "window, so call `cashew_query` before answering any question "
+                "about something said earlier. It returns the graph nodes "
+                "related to your query, each labelled with its domain and "
+                "type; when two of them disagree, the most recent one is what "
+                "is true now."
             ),
         )
 

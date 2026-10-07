@@ -37,6 +37,12 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
+from memory_provider_evals.cashew_backend import (
+    CASHEW_INSTALL_HINT,
+    CashewStore,
+    cashew_home,
+    cashew_installed,
+)
 from memory_provider_evals.chronicle_backend import (
     CHRONICLE_CLONE_HINT,
     ChronicleStore,
@@ -78,10 +84,7 @@ TOOL_OPERATIONS: dict[str, str] = {
 #: How to provision each provider's real backend, quoted back to the operator
 #: when a tool is called without one.
 PROVISIONING_HINTS: dict[str, str] = {
-    "cashew": (
-        "Install magnus919/hermes-cashew and point CASHEW_CONFIG at the "
-        "sandboxed cashew.json the adapter writes."
-    ),
+    "cashew": CASHEW_INSTALL_HINT,
     "chronicle": CHRONICLE_CLONE_HINT,
     "memex8": (
         "Run `docker compose up -d qdrant memex8` from Ex8-ca/memex8 and set "
@@ -97,6 +100,23 @@ def _nachos_store(
     corpus with a lexical scorer *is* the provider, not a stand-in for it."""
     root = Path(workspace_dir) / "nachos_home" / "nachos"
     return LexicalMemoryStore(root / "memories.db")
+
+
+def _cashew_store(
+    adapter: MemoryProviderAdapter, workspace_dir: str | Path
+) -> MemoryStore:
+    """The real Cashew provider, under an ephemeral ``HERMES_HOME``.
+
+    Cashew is a distribution rather than a service, so "provisioned" means the
+    ``cashew`` extra is installed; without it the store is unprovisioned and
+    says how to get it. The store is fetched from the per-home registry rather
+    than constructed, because the adapter driving capture and consolidation
+    must share this one provider — upstream's embedding supervisor admits
+    exactly one owner per interpreter.
+    """
+    if not cashew_installed():
+        return UnprovisionedStore(adapter.name, PROVISIONING_HINTS["cashew"])
+    return CashewStore.get(cashew_home(workspace_dir))
 
 
 def _chronicle_store(
@@ -118,6 +138,7 @@ def _chronicle_store(
 #: absent from here is a separate service that must be running.
 LOCAL_STORE_BUILDERS: dict[str, Callable[[MemoryProviderAdapter, str | Path], MemoryStore]] = {
     "nachos": _nachos_store,
+    "cashew": _cashew_store,
     "chronicle": _chronicle_store,
 }
 
