@@ -21,6 +21,10 @@ from memory_provider_evals.bridge import (
     run_memory_scenario,
     scenario_from_golden,
 )
+from memory_provider_evals.cashew_backend import (
+    CashewStore,
+    cashew_installed,
+)
 from memory_provider_evals.chronicle_backend import (
     ChronicleStore,
     chronicle_repo_root,
@@ -48,6 +52,7 @@ __all__ = [
     "ADAPTERS",
     "BackendNotProvisioned",
     "CashewAdapter",
+    "CashewStore",
     "ChronicleAdapter",
     "ChronicleStore",
     "LexicalMemoryStore",
@@ -62,6 +67,7 @@ __all__ = [
     "UnprovisionedStore",
     "build_adapter",
     "build_memory_server",
+    "cashew_installed",
     "chronicle_repo_root",
     "conversational_test_case_from_trace",
     "default_provider",

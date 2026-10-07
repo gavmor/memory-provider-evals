@@ -17,13 +17,14 @@ import pytest
 from mcp.client import Client
 from traced_harness.memory import MemoryProviderAdapter, MemoryToolContract
 
-from memory_provider_evals import chronicle_backend
+from memory_provider_evals import chronicle_backend, mcp_server
 from memory_provider_evals.adapters import (
     CashewAdapter,
     ChronicleAdapter,
     Memex8Adapter,
     NachosAdapter,
 )
+from memory_provider_evals.cashew_backend import CashewStore, cashew_installed
 from memory_provider_evals.chronicle_backend import (
     ChronicleStore,
     chronicle_repo_root,
@@ -107,11 +108,30 @@ def test_nachos_gets_a_real_local_store_under_its_own_workspace(tmp_path):
     assert store.db_path.parent == tmp_path / "nachos_home" / "nachos"
 
 
-@pytest.mark.parametrize("adapter_cls", [CashewAdapter, Memex8Adapter])
-def test_service_backed_providers_get_an_unprovisioned_store(adapter_cls, tmp_path):
-    store = store_for(adapter_cls(dry_run=True), tmp_path)
+def test_service_backed_providers_get_an_unprovisioned_store(tmp_path):
+    store = store_for(Memex8Adapter(dry_run=True), tmp_path)
     assert isinstance(store, UnprovisionedStore)
     assert store.provisioning_hint
+
+
+def test_cashew_gets_the_real_provider_when_the_extra_is_installed(tmp_path):
+    """Cashew is a distribution, not a service: installing the extra is the
+    whole provisioning step, so a provisioned run talks to the real engine."""
+    if not cashew_installed():
+        pytest.skip("cashew extra not installed on this machine")
+    store = store_for(CashewAdapter(dry_run=True), tmp_path)
+    assert isinstance(store, CashewStore)
+    # The same ephemeral home the adapter's setup() creates, so the bytes this
+    # store writes land inside the declared store_paths.
+    assert store.hermes_home == (tmp_path / "cashew_home").resolve()
+
+
+def test_cashew_without_the_extra_names_the_install(tmp_path, monkeypatch):
+    """An absent backend has to say which absent backend, and how to get it."""
+    monkeypatch.setattr(mcp_server, "cashew_installed", lambda: False)
+    store = store_for(CashewAdapter(dry_run=True), tmp_path)
+    assert isinstance(store, UnprovisionedStore)
+    assert "--extra cashew" in store.provisioning_hint
 
 
 def test_chronicle_gets_the_real_engine_when_a_checkout_is_present(tmp_path):

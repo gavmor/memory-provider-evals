@@ -96,6 +96,7 @@ src/memory_provider_evals/
   memory_store.py # what answers a memory tool: a real lexical SQLite store
                   # (Nachos) or an explicit "not provisioned" failure
   chronicle_backend.py  # the real Chronicle engine, off a checkout
+  cashew_backend.py     # the real Cashew provider, off an installed extra
   mcp_server.py   # contract -> live MCP server exposing the provider's tools
   live.py         # the wired run: server -> client -> create_agent(client=...)
   trace.py        # TraceRecord + MemoryEvalSuite judges (metric internals)
@@ -116,10 +117,11 @@ tests/
 export GEMINI_API_KEY=...
 uv run memorybench --provider nachos
 uv run memorybench --provider chronicle
+uv run memorybench --provider cashew
 ```
 
-Two providers run end to end here. `nachos` is text-only and local-first, which
-is what `LexicalMemoryStore` implements, so it needs no backend at all.
+Three providers run end to end here. `nachos` is text-only and local-first,
+which is what `LexicalMemoryStore` implements, so it needs no backend at all.
 `chronicle` needs a checkout and nothing else — it is a stdlib-only Hermes
 plugin, not a service:
 
@@ -130,10 +132,22 @@ git clone https://github.com/indigokarasu/chronicle-agent-context-and-memory.git
 `vendor/` is gitignored; `$CHRONICLE_REPO` points at a checkout anywhere, and
 one installed with `hermes plugins install
 indigokarasu/chronicle-agent-context-and-memory` is found automatically.
-`cashew` and `memex8` still raise `BackendNotProvisioned`, naming the
-provisioning step, until their service is running; that lands in the
-benchmark's `error` column rather than scoring as a provider that remembered
-nothing.
+
+`cashew` is a real distribution, so provisioning it is an install:
+
+```
+uv sync --extra cashew
+```
+
+It is an extra rather than a dependency because it is expensive in two ways:
+`hermes-cashew` pulls `cashew-brain`, `torch` and `sentence-transformers`
+(several GB), and `cashew-brain` claims the top-level `core`, `extractors`,
+`integration` and `scripts` module names. The default `uv sync` stays clean.
+
+`memex8` still raises `BackendNotProvisioned`, naming the provisioning step,
+until its service is running; so does `cashew` without the extra. That lands in
+the benchmark's `error` column rather than scoring as a provider that
+remembered nothing.
 
 `AGENT_MODEL_NAME` selects the agent model (default `gemini-flash-lite-latest`;
 the harness default `gemini-3.1-flash-lite-preview` returns 503s). The free
